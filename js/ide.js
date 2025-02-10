@@ -45,6 +45,182 @@ var timeEnd;
 var sqliteAdditionalFiles;
 var languages = {};
 
+// Add inline chat popup
+function showInlineChatPopup(selectedText, position) {
+    // Remove any existing popup before creating a new one
+    document.querySelectorAll('.inline-chat-popup').forEach(el => el.remove());
+
+    // Create popup container
+    const popup = document.createElement('div');
+    popup.className = 'inline-chat-popup';
+    Object.assign(popup.style, {
+        position: 'absolute',
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        zIndex: 1000,
+        backgroundColor: '#ffffff',
+        border: '1px solid #ddd',
+        borderRadius: '12px',
+        padding: '12px',
+        boxShadow: '0 4px 15px rgba(0, 0, 0, 0.15)',
+        width: '280px',
+        transition: 'opacity 0.2s ease-in-out',
+        opacity: '0', // Initially hidden for animation
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px'
+    });
+
+    // Fade-in effect
+    setTimeout(() => popup.style.opacity = '1', 10);
+
+    // Close button
+    const closeBtn = document.createElement('span');
+    closeBtn.textContent = '×';
+    Object.assign(closeBtn.style, {
+        position: 'absolute',
+        top: '6px',
+        right: '10px',
+        fontSize: '18px',
+        cursor: 'pointer',
+        color: '#888'
+    });
+    closeBtn.onclick = () => popup.remove();
+
+    // Input container (input & button on the same line)
+    const inputContainer = document.createElement('div');
+    Object.assign(inputContainer.style, {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px'
+    });
+
+    // Chat input field
+    const input = document.createElement('input');
+    Object.assign(input.style, {
+        flex: '1',
+        padding: '8px',
+        border: '1px solid #ccc',
+        borderRadius: '6px',
+        fontSize: '14px',
+        outline: 'none'
+    });
+    input.type = 'text';
+    input.placeholder = 'Ask about this code...';
+
+    // Send button
+    const button = document.createElement('button');
+    button.textContent = 'Ask';
+    Object.assign(button.style, {
+        padding: '8px 12px',
+        backgroundColor: '#007bff',
+        color: '#ffffff',
+        border: 'none',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        transition: 'background-color 0.2s ease-in-out'
+    });
+    button.onmouseover = () => button.style.backgroundColor = '#0056b3';
+    button.onmouseout = () => button.style.backgroundColor = '#007bff';
+
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(button);
+
+    // Response area (Hidden initially)
+    const responseArea = document.createElement('div');
+    Object.assign(responseArea.style, {
+        display: 'none', // Hidden initially
+        maxHeight: '150px',
+        overflowY: 'auto',
+        fontSize: '14px',
+        backgroundColor: '#f8f9fa',
+        padding: '8px',
+        borderRadius: '8px',
+        minHeight: '40px',
+        border: '1px solid #ccc'
+    });
+
+    // Handle sending message
+    async function sendInlineMessage() {
+        const message = input.value.trim();
+        if (message) {
+            responseArea.style.display = 'block'; // Show response area
+            responseArea.innerHTML = `<span style="color: #888;">Thinking...</span>`;
+            console.log(selectedText);
+            console.log(sourceEditor.getValue());
+            try {
+                const editorContext = {
+                    selectedText: selectedText,
+                    fullSourceCode: sourceEditor.getValue(),
+                    language: $selectLanguage.find(":selected").text(),
+                    languageId: getSelectedLanguageId()
+                };
+                console.log(editorContext);
+
+                const response = await fetch('http://localhost:3000/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        prompt: message,
+                        context: editorContext
+                    })
+                });
+
+                if (!response.ok) throw new Error('Network error');
+
+                const aiResponse = await response.json();
+                responseArea.innerHTML = `<strong>AI:</strong> ${aiResponse.response}`;
+                input.value = '';
+
+            } catch (error) {
+                console.error('Error:', error);
+                responseArea.innerHTML = `<span style="color: red;">Error processing request</span>`;
+            }
+        }
+    }
+
+    button.onclick = sendInlineMessage;
+    input.onkeypress = (e) => { if (e.key === 'Enter') sendInlineMessage(); };
+
+    // Assemble popup
+    popup.appendChild(closeBtn);
+    popup.appendChild(inputContainer);
+    popup.appendChild(responseArea);
+    document.body.appendChild(popup);
+
+    // Prevent going off-screen
+    const popupRect = popup.getBoundingClientRect();
+    if (popupRect.right > window.innerWidth) {
+        popup.style.left = `${window.innerWidth - popupRect.width - 20}px`;
+    }
+    if (popupRect.bottom > window.innerHeight) {
+        popup.style.top = `${window.innerHeight - popupRect.height - 20}px`;
+    }
+}
+
+
+
+// Add mouse selection handler for source editor
+function handleEditorSelection() {
+    const selection = sourceEditor.getSelection();
+    const selectedText = sourceEditor.getModel().getValueInRange(selection);
+    
+    if (selectedText) {
+        // Get position of the selection start
+        const coords = sourceEditor.getScrolledVisiblePosition({
+            lineNumber: selection.startLineNumber,
+            column: selection.startColumn
+        });
+        const editorCoords = sourceEditor.getDomNode().getBoundingClientRect();
+        
+        showInlineChatPopup(selectedText, {
+            x: editorCoords.left + coords.left,
+            y: editorCoords.top + coords.top - 60 // Position above the text
+        });
+    }
+}
+
 var layoutConfig = {
     settings: {
         showPopoutIcon: false,
@@ -54,7 +230,7 @@ var layoutConfig = {
         type: "row",
         content: [{
             type: "component",
-            width: 66,
+            width: 60,  // IDE takes 55%
             componentName: "source",
             id: "source",
             title: "Source Code",
@@ -64,6 +240,7 @@ var layoutConfig = {
             }
         }, {
             type: "column",
+            width: 15,  // Input & Output together take 15%
             content: [{
                 type: "component",
                 componentName: "stdin",
@@ -83,9 +260,23 @@ var layoutConfig = {
                     readOnly: true
                 }
             }]
+        }, {
+            type: "column",
+            width: 25,  // AI Chat takes 30%
+            content: [{
+                type: "component",
+                componentName: "aichat",
+                id: "aichat",
+                title: "AI Chat",
+                isClosable: false,
+                componentState: {
+                    readOnly: false
+                }
+            }]
         }]
     }]
 };
+
 
 const PUTER = puter.env === "app";
 var gPuterFile;
@@ -554,6 +745,11 @@ $(document).ready(async function () {
             });
 
             sourceEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+            
+            // Add mouse up event listener for text selection
+            sourceEditor.onMouseUp((e) => {
+                handleEditorSelection();
+            });
         });
 
         layout.registerComponent("stdin", function (container, state) {
@@ -581,6 +777,134 @@ $(document).ready(async function () {
                 }
             });
         });
+        layout.registerComponent('aichat', function (container, state) {
+            // Create a simple chat interface
+            const chatContainer = document.createElement('div');
+            chatContainer.style.display = 'flex';
+            chatContainer.style.flexDirection = 'column';
+            chatContainer.style.height = '100%';
+            chatContainer.style.width = '500px'; // Increased width
+            chatContainer.style.padding = '10px';
+            chatContainer.style.borderRadius = '10px';
+            chatContainer.style.border = '1px solid #ccc';
+            chatContainer.style.backgroundColor = '#ffffff';
+        
+            // Chat messages container (more space for AI chat)
+            const messagesContainer = document.createElement('div');
+            messagesContainer.style.flex = '1.5'; // Increased space for messages
+            messagesContainer.style.overflowY = 'auto';
+            messagesContainer.style.padding = '10px';
+            messagesContainer.style.borderBottom = '1px solid #ccc';
+            messagesContainer.style.backgroundColor = '#f9f9f9';
+            messagesContainer.style.borderRadius = '10px';
+            chatContainer.appendChild(messagesContainer);
+        
+            // Input field for new messages
+            const inputContainer = document.createElement('div');
+            inputContainer.style.position = 'sticky';
+            inputContainer.style.bottom = '0';
+            inputContainer.style.width = '100%';
+            inputContainer.style.backgroundColor = '#ffffff';
+            inputContainer.style.borderTop = '1px solid #ccc';
+        
+            const inputField = document.createElement('input');
+            inputField.placeholder = 'Type a message...';
+            inputField.style.flex = '1';
+            inputField.style.padding = '12px';
+            inputField.style.border = '1px solid #ccc';
+            inputField.style.borderRadius = '20px';
+            inputField.style.fontSize = '16px';
+            inputContainer.appendChild(inputField);
+        
+            const sendButton = document.createElement('button');
+            sendButton.innerText = 'Send';
+            sendButton.style.padding = '12px 20px';
+            sendButton.style.marginLeft = '10px';
+            sendButton.style.border = 'none';
+            sendButton.style.borderRadius = '20px';
+            sendButton.style.backgroundColor = '#007bff';
+            sendButton.style.color = '#fff';
+            sendButton.style.cursor = 'pointer';
+            sendButton.style.fontSize = '16px';
+            sendButton.addEventListener('mouseenter', () => sendButton.style.backgroundColor = '#0056b3');
+            sendButton.addEventListener('mouseleave', () => sendButton.style.backgroundColor = '#007bff');
+            inputContainer.appendChild(sendButton);
+        
+            // Append input container to the chat container
+            chatContainer.appendChild(inputContainer);
+        
+            // Append chat container to the GoldenLayout container
+            container.getElement().append(chatContainer);
+        
+            // Handle message sending
+            const sendMessage = async () => {
+                const message = inputField.value.trim();
+                if (message) {
+                    // Display user's message
+                    displayMessage(message, 'right');
+                    inputField.value = ''; // Clear input
+        
+                    try {
+                        // Get current editor context
+                        const editorContext = {
+                            selectedText: "",
+                            sourceCode: sourceEditor.getValue(),
+                            language: $selectLanguage.find(":selected").text(),
+                            languageId: getSelectedLanguageId()
+                        };
+        
+                        // Send message to backend API with context
+                        const response = await fetch('http://localhost:3000/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ prompt: message, context: editorContext })
+                        });
+        
+                        if (!response.ok) throw new Error('Network response was not ok');
+        
+                        const aiResponse = await response.json();
+                        // Display AI response
+                        displayMessage(aiResponse.response, 'left');
+        
+                    } catch (error) {
+                        console.error('Error:', error);
+                        displayMessage('Sorry, there was an error processing your request.', 'left');
+                    }
+                }
+            };
+        
+            sendButton.addEventListener('click', sendMessage);
+            inputField.addEventListener('keypress', function (event) {
+                if (event.key === 'Enter') sendMessage();
+            });
+        
+            // Function to display message
+            function displayMessage(message, side) {
+                const messageDiv = document.createElement('div');
+                messageDiv.innerText = message;
+                messageDiv.style.padding = '12px';
+                messageDiv.style.margin = '8px 0';
+                messageDiv.style.borderRadius = '10px';
+                messageDiv.style.whiteSpace = 'pre-wrap';
+                messageDiv.style.maxWidth = '75%';
+                messageDiv.style.fontSize = '16px';
+                messageDiv.style.lineHeight = '1.4';
+        
+                if (side === 'right') {
+                    messageDiv.style.backgroundColor = '#d1e7ff';
+                    messageDiv.style.alignSelf = 'flex-end';
+                    messageDiv.style.marginLeft = 'auto';
+                } else {
+                    messageDiv.style.backgroundColor = '#e2e2e2';
+                    messageDiv.style.alignSelf = 'flex-start';
+                    messageDiv.style.marginRight = 'auto';
+                }
+        
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        });
+        
 
         layout.on("initialised", function () {
             setDefaults();
